@@ -13,12 +13,16 @@ computer=np.zeros((3,3),dtype=int)
 canvas_size=0
 cv=None
 
+computer_history=[np.array(computer,copy=True)]
+player_history=[np.array(player,copy=True)]
+
 def load(width=900,height=900):
     global canvas_size
     global cv
     win=tkinter.Tk()
     win.title("TicTacToe")
     win.geometry("{}x{}".format(str(width),str(height)))
+    win['menu']=initize_menu(win)
     canvas_size=min(width,height)
     cv=tkinter.Canvas(win,width=canvas_size,bg="blue",height=canvas_size)
     for i in range(1,3):
@@ -28,9 +32,43 @@ def load(width=900,height=900):
     cv.pack()
     win.mainloop()
 
+    
+def initize_menu(win):
+    win.title("TicTacToe")
+    m=tkinter.Menu(win)
+    m.add_command(label='悔棋',command=regret)
+    return m
+
+def regret():
+    global computer_history
+    global player_history
+    global computer
+    global player
+    global cv
+    if len(computer_history)==1:
+       tkinter.messagebox.showinfo("提示","无子可悔！") 
+       return
+    computer_history.pop()
+    player_history.pop()
+    
+    print(computer_history)
+    computer=computer_history[-1]
+    player=player_history[-1]
+    if len(computer_history)==1:#不知道为啥点撤点撤出bug先改了
+        computer_history=[np.zeros((3,3),dtype=int)]
+        player_history=[np.zeros((3,3),dtype=int)]
+        
+    cv.delete("all")
+    for i in range(1,3):
+        cv.create_line(0,canvas_size//3*i,canvas_size,canvas_size//3*i)
+        cv.create_line(canvas_size//3*i,0,canvas_size//3*i,canvas_size)
+    refresh()
+            
 def call(event):
     x=int(event.x/canvas_size*3)
     y=int(event.y/canvas_size*3)
+    global computer_history
+    global player_history
     global player
     global computer
     if player[x][y]==1:
@@ -39,16 +77,17 @@ def call(event):
         tkinter.messagebox.showinfo("提示","不能选择对方已落子的区域")
     else:
         player[x][y]=1
+        player_history.append(np.array(player,copy=True))
         refresh()
         if check_win():
             return
         time.sleep(0.5)
         auto_move()
+        computer_history.append(np.array(computer,copy=True))#cccccc
+        print(computer_history)
         refresh()
-        if check_win():
-            refresh()
+        check_win()
             
-    
     
 def refresh():
     global computer
@@ -85,6 +124,8 @@ def check_even(a,b):
 def check_win():
     global computer
     global player
+    global computer_history
+    global player_history
     reset=False
     if check_win_single(player):
         tkinter.messagebox.showinfo("提示","己方获胜")
@@ -96,12 +137,16 @@ def check_win():
         tkinter.messagebox.showinfo("提示","平局")
         
         reset=True
-        print(reset)
     if reset:
         player=np.zeros((3,3),dtype=int)
         computer=np.zeros((3,3),dtype=int)
         cv.delete("all")
+        for i in range(1,3):
+            cv.create_line(0,canvas_size//3*i,canvas_size,canvas_size//3*i)
+            cv.create_line(canvas_size//3*i,0,canvas_size//3*i,canvas_size)
         refresh()
+        computer_history=[np.zeros((3,3),dtype=int)]
+        player_history=[np.zeros((3,3),dtype=int)]
     return reset
 
 def maxsearch(t_computer,t_player):
@@ -128,7 +173,7 @@ def maxsearch(t_computer,t_player):
                 a[i][j]=1
                 temp_value=max(temp_value,minsearch(a,b))
     return temp_value
-                
+               
 def minsearch(t_computer,t_player):
     temp_value=1
     if check_win_single(t_computer):
@@ -146,9 +191,7 @@ def minsearch(t_computer,t_player):
                 b[i][j]=1
                 temp_value=min(temp_value,maxsearch(a,b))
     return temp_value
-    
-    
-    
+      
         
 def auto_move():
     global computer
@@ -164,7 +207,6 @@ def auto_move():
                 temp_computer[i][j]=1
                 temp_value=minsearch(temp_computer, temp_player)
                 if temp_value>value:
-                    print(temp_value)
                     temp_x=i
                     temp_y=j
                     value=temp_value
