@@ -53,6 +53,8 @@ class Game:
         self.computer_history=[np.zeros((N,N),dtype=int)]
         self.player_history=[np.zeros((N,N),dtype=int)]
         
+       
+        
 
         
     def load(self,width=900,height=900):
@@ -62,8 +64,10 @@ class Game:
         win=tkinter.Tk()
         win.title("TicTacToe")
         win.geometry("{}x{}".format(str(width),str(height)))
+        
         m=tkinter.Menu(win)
         m.add_command(label='悔棋',command=self.regret)
+        m.add_command(label='格数',command=self.adjust_grid)
         win['menu']=m
         
         canvas_size=min(width,height)
@@ -83,6 +87,26 @@ class Game:
         for i in range(1,N):
             cv.create_line(0,l//N*i,l,l//N*i)
             cv.create_line(l//N*i,0,l//N*i,l)
+            
+    def adjust_grid(self):
+        new_n=tkinter.simpledialog.askinteger("S", "重新设置棋盘格数\n修改后会清空棋盘！！！",initialvalue=3)
+        if new_n==self.N:
+            return
+        else:
+            self.N=new_n
+            self.reset()
+            
+    def reset(self):
+        N=self.N
+        self.player=np.zeros((N,N),dtype=int)  
+        self.computer=np.zeros((N,N),dtype=int)
+        self.computer_history=[np.zeros((N,N),dtype=int)]
+        self.player_history=[np.zeros((N,N),dtype=int)]
+        
+        self.cv.delete("all")
+        self.canvas_grid()
+        self.refresh() 
+        
         
     def run(self):
         self.win.mainloop()
@@ -147,13 +171,7 @@ class Game:
             
             reset=True
         if reset:
-            self.computer_history=[np.zeros((self.N,self.N),dtype=int)]
-            self.player_history=[np.zeros((self.N,self.N),dtype=int)]
-            self.computer=np.zeros((self.N,self.N),dtype=int)
-            self.player=np.zeros((self.N,self.N),dtype=int)
-            self.cv.delete("all")
-            self.canvas_grid()
-            self.refresh()           
+            self.reset()         
         return reset
     
     def auto_move(self):
@@ -175,7 +193,7 @@ class Game:
                         value=temp_value
                     if value==1:
                         break
-        if temp_x==0 and temp_y==0:
+        if value==-1:
             temp_x,temp_y=random.choice(choosable)#如果没希望了就随机走          
         self.computer[temp_x][temp_y]=1
         
@@ -246,11 +264,66 @@ def minsearch(t_computer,t_player):
                 temp_value=min(temp_value,maxsearch(a,b))
     return temp_value
 
+########################################################
 
+class Node:
+    
+    Cpuct=0.1
+    
+    def __init__(self,parent=None,P=None,player_label=1):
+        self.parent=parent
+        self.child={}#key用坐标的元组,直接在P里索引就好，我好聪明欸
+        self.player_label=player_label
+        
+        self.N=1
+        self.W=0
+        
+        self.Q=None
+        self.P=P
+        self.U=None
+        self.UCB=None#本节点的ucb计算出来是给父节点做备选的
+        
+    def backup(self,v):
+        self.N+=1
+        self.W+=v
+        if self.parent!=None:
+            self.parent.backup(-v)
+        
+    def compute(self):
+        max_UCB=-np.inf
+        ret_move=(0,0)
+        for move,node in self.child.items():
+            node.Q=node.W/node.N
+            node.U=Node.Cpuct*self.P[move]*np.sqrt(self.N)/(1+node.N)
+            node.UCB=node.U+node.Q
+            if node.UCB>max_UCB:
+                max_UCB=node.UCB
+                ret_move=move
+        self.ret_move=ret_move
+            
+    def add_child(self,move,P):
+        self.child[move]=Node(self,P)
+    
+    def lack_child(self):
+        return not bool(self.child)
+
+class MCTS:
+    def __init__(self,board_size=5,simulation_time=400,nn=None):
+        self.board_size=board_size
+        self.simulation_time=simulation_time
+        self.neural_network=nn
+        
+        self.root=Node(player_label=1)
+        
+        
+        
+        
+        
+        
                         
                   
 if __name__=="__main__":
-    ga=Game(N=4)
+    ga=Game()
     ga.load()
     ga.run()
     ga.destroy()
