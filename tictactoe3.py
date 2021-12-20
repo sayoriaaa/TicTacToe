@@ -5,11 +5,7 @@ Created on Tue Dec 14 19:22:33 2021
 @author: sayori
 
 关于模型的保存，本来用json的，结果发现只能使用pickle，json不支持类的存储
-pickle只能以二进制读写，但是可以自定义文件名，好耶
-考虑到其他类要调用当前游戏进程的数据
-因为game类只创建一次，将参数提到类变量
-
-
+pickle只能以二进制读写
 
 """
 import tkinter
@@ -17,12 +13,14 @@ import numpy as np
 import time
 import random
 import pickle
+import copy
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import torch.utils.data as torch_data
+
 
 
 
@@ -297,7 +295,7 @@ class Game:
                     computer_history.append(computer)
             
 ##################################################
-#一局训练好打包
+#一局训练好打包done
                 state=[]
                 Z_matrix=[]
                 z_matrix=fill_matrix(size=N,num=z)
@@ -315,9 +313,10 @@ class Game:
                 tensor_pi = torch.stack(tuple([torch.from_numpy(p) for p in pi]))
                 tensor_z = torch.stack(tuple([torch.from_numpy(z) for z in Z_matrix]))
                 dataset = torch_data.TensorDataset(tensor_states, tensor_pi, tensor_z)
-                my_loader = torch_data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
+                my_loader = torch_data.DataLoader(dataset, batch_size=1, shuffle=True)
                        
                 self.neural_network.train(my_loader) 
+                print("已训练{}次对局".format(go))
             self.MCTS=training_MCTS
                 
                         
@@ -405,7 +404,7 @@ def minsearch(t_computer,t_player):
                 temp_value=min(temp_value,maxsearch(a,b))
     return temp_value
 
-########################################################
+########################################################print
 
 class Node:
     
@@ -424,9 +423,11 @@ class Node:
         self.U=None
         self.UCB=None#本节点的ucb计算出来是给父节点做备选的
         
-    def backup(self,v):
+    def backup(self,v,stop=None):
         self.N+=1
         self.W+=v
+        if self==stop:
+            return
         if self.parent!=None:
             self.parent.backup(-v)
         
@@ -497,13 +498,15 @@ class MCTS:
             computer_for_sim=np.array(computer,copy=True)
             while self.check_prceed(player_for_sim, computer_for_sim):
                 if self.current_node.lack_child():
-                    self.P,v=self.neural_network.eva(self.get_state_for_eval(player,computer))
+                    P,v=self.neural_network.eva(self.get_state_for_eval(player,computer))
+                    self.current_node.P=np.array(P.cpu()).reshape((self.board_size,self.board_size))
                     eval_counter+=1
                     self.current_node.backup(v)
                     self.expand_treenode(player, computer)
                 next_move=self.current_node.get_ucb()
                 self.sim_move(player_for_sim, computer_for_sim, next_move)
                 self.current_node=self.current_node.child[next_move]
+                self.current_node.parent={}
                 self.current_node.N+=1
         return eval_counter/self.simulation_time#返回平均每次搜索的深度
     
@@ -513,6 +516,7 @@ class MCTS:
         else:
             s=np.stack([computer,player])    
         tensor_states = torch.from_numpy(s)
+        tensor_states=torch.unsqueeze(tensor_states, dim=0)
         return tensor_states
                 
             
@@ -540,7 +544,7 @@ class MCTS:
         for i in range(size):
             for j in range(size):
                 if player[i,j]==0 and computer[i,j]==0:
-                    self.current_node.add_child((i,j),parent=self.current_node,player_label=-self.current_player)
+                    self.current_node.add_child((i,j))
     def sim_move(self,player,computer,move):
         if self.current_player==1:
             player[move]=1
@@ -553,7 +557,7 @@ class MCTS:
                 
 
 class NN1(nn.Module):   
-    def __init__(self,input_layer,board_size=5):
+    def __init__(self,input_layer,board_size=15):
         super(NN1,self).__init__()
         self.conv1=nn.Conv2d(input_layer, 32, 3)
         self.conv2=nn.Conv2d(32, 64, 3)
@@ -565,6 +569,9 @@ class NN1(nn.Module):
         self.relu=nn.ReLU()
         self.tanh=nn.Tanh()
         
+        self.board_size=board_size
+        self.flatten_size=16*(board_size-6)*(board_size-6)#16是降采样后的通道数，见self.p_conv1=nn.Conv2d(128,16, 1)
+        
         ###############################
         
         self.v_conv1=nn.Conv2d(128,16, 1)
@@ -574,7 +581,7 @@ class NN1(nn.Module):
         
         self.p_conv1=nn.Conv2d(128,16, 1)
         self.p_bn1=nn.BatchNorm2d(16)
-        self.v_fc1=nn.Linear(256, board_size**2)
+        self.p_fc1=nn.Linear(self.flatten_size, out_features=board_size*board_size)
         
         
     def forward(self,x):
@@ -582,12 +589,13 @@ class NN1(nn.Module):
         x=self.relu(self.bn2(self.conv2(x)))
         x=self.relu(self.bn3(self.conv3(x)))
         
-        v=self.relu(self.v_bn1(self.v_conv1(x))).view(-1,256)
+        v=self.relu(self.v_bn1(self.v_conv1(x))).view(-1,self.flatten_size)
         v=self.relu(self.v_fc1(v))
         v=self.tanh(self.v_fc2(v))
         
-        p=self.relu(self.p_bn1(self.p_conv1(x))).view(-1,256)
+        p=self.relu(self.p_bn1(self.p_conv1(x))).view(-1,self.flatten_size)
         p=self.relu(self.p_fc1(p))
+
         
         return p,v
     
@@ -622,9 +630,8 @@ class SNN:
             loss.backward()           
             self.opt.step()
             
-            if idx%10==0:
-                print("已训练{}局，mse{}，cross entropy:{}".format(idx,mse.data,cross_entropy.data))
-                loss_record.append((mse.data,cross_entropy.data))
+            print("已训练{}局，mse{}，cross entropy:{}".format(idx,mse.data,cross_entropy.data))
+            loss_record.append((mse.data,cross_entropy.data))
         return loss_record
     
     def eva(self,S):
